@@ -70,3 +70,20 @@
 - Auto token refresh on 401 responses
 - Search debounced at 500ms
 - WebView communicates position back via postMessage
+
+### Build Issues
+- AsyncStorage v3.0.1 has missing maven artifact (org.asyncstorage.shared_storage:storage-android:1.0.0)
+  → Fixed by downgrading to v2.1.2 (stable, compatible)
+- Android SDK installed locally: platform-35, build-tools-35.0.0, NDK 27.1
+- Prebuild generates native Android project successfully
+- Gradle build initiated for release APK
+
+### Build Result
+- APK built successfully: `bsr-app-v1.0.0.apk` (76 MB)
+- Build time: ~2 min (Gradle 9.0.0)
+- Includes native code for arm64-v8a, armeabi-v7a, x86, x86_64
+- Note: unsigned release APK (needs signing for Play Store)
+
+### GitHub
+- Repo created: https://github.com/funkypitt/bsr-app
+- Initial commit pushed to master
