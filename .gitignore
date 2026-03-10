@@ -1,1 +1,8 @@
-node_modules/\n.expo/\nandroid/\nios/\n*.apk\n*.aab\n
+node_modules/
+.expo/
+android/
+ios/
+*.apk
+*.aab
+dist/
+.env
