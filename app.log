@@ -1,0 +1,72 @@
+# BSR App - Development Log
+
+## 2026-03-09 - Research & Architecture
+
+### Investigation: bibliothequesonore.ch
+- REJECTED: Audio content entirely behind BSR membership auth (visual impairment certification required)
+- No public API, no audio samples, no excerpts accessible without login
+- Drupal CMS with no exposed REST/JSON endpoints
+
+### Investigation: lausanne.ebibliomedia.ch (Cantook by Demarque)
+- SUCCESS: Full OPDS 2.0 API discovered
+- Platform: Cantook Station by Demarque (Rails backend)
+- 705 audiobooks, 10,440 ebooks in the catalog
+
+### API Endpoints Discovered
+- Auth: OAuth 2.0 password grant at `/oauth/token`
+- Auth document: `/v1/sign_in.opds2` (OPDS authentication document)
+- Search: `/v1/resources.opds2?query={q}` (supports `formats[]=audiobook` filter)
+- Book detail: `/resources/{id}.opds2`
+- Loans: `/v1/my_profile/activity.opds2`
+- History: `/v1/my_profile/history.opds2`
+- Wishlist: `/v1/my_profile/wishlist.opds2`
+- Progression: `/resources/{id}/progression.opds2` (PUT/GET)
+- Profile: `/v1/my_profile.opds2`
+
+### Audio Delivery
+- Streaming: Cantooka audio player via signed HTML URLs (`/loans/{id}.html?drm=none&nonce=...&token=...`)
+- Cantooka player is a Vue.js SPA that plays Readium WebPub manifests
+- Manifests at `edenlivres.fr/audio/{id}/manifest.json` (public = sample only, authenticated = full)
+- MP3 files hosted on `assets.edenlivres.fr`
+- LCP DRM option also available (`application/audiobook+lcp`)
+- Sample MP3s publicly accessible
+
+### Architecture Decisions
+1. **Framework**: React Native + Expo (TypeScript) — single codebase, simplest build pipeline
+2. **Audio playback**: WebView embedding Cantooka player — leverages existing player (speed control, chapters built-in)
+3. **Auth**: OAuth 2.0 password grant via `/oauth/token`
+4. **Position tracking**: AsyncStorage locally + server progression API sync
+5. **Design**: ebibliomedia palette (Red #CA0000, Green #56AA5E, Orange #AB4200)
+6. **Navigation**: expo-router with tabs (Search, Library, Profile) + modal player
+
+### Design Decisions
+- Minimal UI: 3 tabs + detail/player screens
+- Book cards with cover thumbnails, title, author, duration badge
+- Audio-only filter toggle on search
+- Loan list with progress bars
+- Cantooka WebView for playback (already handles speed, chapters, position)
+- Red/white theme matching ebibliomedia branding
+
+## 2026-03-10 - Implementation
+
+### Files Created
+- `src/types/index.ts` - TypeScript types (OPDSPublication, Book, Loan, etc.)
+- `src/api/client.ts` - Full OPDS API client (auth, search, loans, progression)
+- `src/context/auth.tsx` - React auth context with session restore
+- `src/theme.ts` - Design tokens (colors, spacing, typography)
+- `app/_layout.tsx` - Root layout with auth provider
+- `app/index.tsx` - Entry point with auth redirect
+- `app/login.tsx` - Login screen (email + password)
+- `app/(tabs)/_layout.tsx` - Tab navigator
+- `app/(tabs)/index.tsx` - Search screen with debounced input + audio filter
+- `app/(tabs)/library.tsx` - Loans list with progress tracking
+- `app/(tabs)/settings.tsx` - Profile/logout
+- `app/book/[id].tsx` - Book detail with borrow/listen actions
+- `app/player/[id].tsx` - WebView Cantooka player with position saving
+
+### Key Technical Notes
+- OAuth tokens stored in expo-secure-store (encrypted)
+- Position saved every 10s via JS injection into WebView
+- Auto token refresh on 401 responses
+- Search debounced at 500ms
+- WebView communicates position back via postMessage
