@@ -195,8 +195,8 @@ export async function search(
   query: string,
   audioOnly = false
 ): Promise<Book[]> {
-  let url = `${API}/resources.opds2?query=${encodeURIComponent(query)}`;
-  if (audioOnly) url += "&formats%5B%5D=audiobook";
+  let url = `${API}/resources.opds2?q=${encodeURIComponent(query)}`;
+  if (audioOnly) url += "&nature=audio";
   const feed = await fetchJSON<OPDSFeed>(url);
   return (feed.publications ?? []).map(pubToBook);
 }
