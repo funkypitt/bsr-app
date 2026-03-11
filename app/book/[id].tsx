@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import * as api from "../../src/api/client";
-import { getStoredBook } from "../../src/store";
+import { getStoredBook, getStoredBookAsync } from "../../src/store";
 import { colors, spacing, typography } from "../../src/theme";
 import type { Book } from "../../src/types";
 
@@ -36,39 +36,54 @@ export default function BookDetail() {
     if (!id) return;
 
     (async () => {
-      // 1. Get book from in-memory store (has author from search)
-      const stored = getStoredBook(id);
-
-      // 2. Also fetch fresh OPDS data for current borrow/stream state
-      const fresh = await api.getBook(id);
-
-      // Merge: prefer stored metadata (has author), fresh links
-      const merged: Book = {
-        ...(stored ?? fresh ?? ({} as Book)),
-        // Override links from fresh data if available
-        borrowUrl: fresh?.borrowUrl || stored?.borrowUrl || "",
-        returnUrl: fresh?.returnUrl || stored?.returnUrl || "",
-        streamUrl: fresh?.streamUrl || stored?.streamUrl || "",
-        availability: fresh?.availability || stored?.availability,
-      };
-
-      setBook(merged);
-
-      // 3. Check if already borrowed (stream URL comes from loans)
       try {
-        const loans = await api.getLoans();
-        const loan = loans.find((l) => l.id === id);
-        if (loan?.streamUrl) {
-          setLoanStreamUrl(loan.streamUrl);
+        // 1. Get book from in-memory store, then AsyncStorage fallback
+        let stored = getStoredBook(id) ?? (await getStoredBookAsync(id));
+
+        // 2. Also fetch fresh OPDS data for current borrow/stream state
+        let fresh: Book | null = null;
+        try {
+          fresh = await api.getBook(id);
+        } catch {
+          // API call failed, will use stored data
         }
-        if (loan?.returnUrl) {
-          setLoanReturnUrl(loan.returnUrl);
+
+        const base = stored ?? fresh;
+        if (!base) {
+          setLoading(false);
+          return;
+        }
+
+        // Merge: prefer stored metadata (has author), fresh links
+        const merged: Book = {
+          ...base,
+          borrowUrl: fresh?.borrowUrl || stored?.borrowUrl || "",
+          returnUrl: fresh?.returnUrl || stored?.returnUrl || "",
+          streamUrl: fresh?.streamUrl || stored?.streamUrl || "",
+          availability: fresh?.availability || stored?.availability,
+          subjects: base.subjects ?? [],
+        };
+
+        setBook(merged);
+
+        // 3. Check if already borrowed (stream URL comes from loans)
+        try {
+          const loans = await api.getLoans();
+          const loan = loans.find((l) => l.id === id);
+          if (loan?.streamUrl) {
+            setLoanStreamUrl(loan.streamUrl);
+          }
+          if (loan?.returnUrl) {
+            setLoanReturnUrl(loan.returnUrl);
+          }
+        } catch {
+          // ignore
         }
       } catch {
-        // ignore
+        // Outer catch: ensure we always stop loading
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     })();
   }, [id]);
 

@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { WebView } from "react-native-webview";
 import * as api from "../../src/api/client";
-import { getStoredBook } from "../../src/store";
+import { getStoredBook, getStoredBookAsync } from "../../src/store";
 import { colors, spacing, typography } from "../../src/theme";
 
 export default function PlayerScreen() {
@@ -27,8 +27,8 @@ export default function PlayerScreen() {
     if (!id) return;
     (async () => {
       try {
-        // Get metadata from store
-        const stored = getStoredBook(id);
+        // Get metadata from store (in-memory then AsyncStorage)
+        const stored = getStoredBook(id) ?? (await getStoredBookAsync(id));
         if (stored) {
           setTitle(stored.title);
           setAuthor(stored.author);
