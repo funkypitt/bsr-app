@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, Stack } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -9,12 +9,15 @@ import {
 } from "react-native";
 import { WebView } from "react-native-webview";
 import * as api from "../../src/api/client";
+import { getStoredBook } from "../../src/store";
 import { colors, spacing, typography } from "../../src/theme";
-import type { Loan } from "../../src/types";
 
 export default function PlayerScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [loan, setLoan] = useState<Loan | null>(null);
+  const [streamUrl, setStreamUrl] = useState<string>("");
+  const [title, setTitle] = useState("");
+  const [author, setAuthor] = useState("");
+  const [narrator, setNarrator] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const webRef = useRef<WebView>(null);
@@ -24,12 +27,29 @@ export default function PlayerScreen() {
     if (!id) return;
     (async () => {
       try {
+        // Get metadata from store
+        const stored = getStoredBook(id);
+        if (stored) {
+          setTitle(stored.title);
+          setAuthor(stored.author);
+          setNarrator(stored.narrator);
+          if (stored.streamUrl) {
+            setStreamUrl(stored.streamUrl);
+            setLoading(false);
+            return;
+          }
+        }
+
+        // Fetch loans to find stream URL
         const loans = await api.getLoans();
-        const found = loans.find((l) => l.id === id);
-        if (found) {
-          setLoan(found);
+        const loan = loans.find((l) => l.id === id);
+        if (loan?.streamUrl) {
+          setStreamUrl(loan.streamUrl);
+          setTitle(loan.title || stored?.title || "");
+          setAuthor(loan.author || stored?.author || "");
+          setNarrator(loan.narrator || stored?.narrator || "");
         } else {
-          setError("Emprunt non trouvé");
+          setError("Ce livre n'est pas emprunté ou le streaming n'est pas disponible.");
         }
       } catch {
         setError("Impossible de charger le lecteur");
@@ -44,7 +64,7 @@ export default function PlayerScreen() {
 
   // Save position periodically via injected JS
   useEffect(() => {
-    if (!loan) return;
+    if (!streamUrl) return;
     positionInterval.current = setInterval(() => {
       webRef.current?.injectJavaScript(`
         (function() {
@@ -63,7 +83,7 @@ export default function PlayerScreen() {
     }, 10000);
 
     return () => clearInterval(positionInterval.current);
-  }, [loan]);
+  }, [streamUrl]);
 
   const handleMessage = async (event: { nativeEvent: { data: string } }) => {
     try {
@@ -77,7 +97,6 @@ export default function PlayerScreen() {
           "playback_positions",
           JSON.stringify(positions)
         );
-        // Also try server-side save
         api.saveProgression(id, data.position);
       }
     } catch {
@@ -94,28 +113,29 @@ export default function PlayerScreen() {
     );
   }
 
-  if (error || !loan) {
+  if (error || !streamUrl) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.errorText}>{error || "Erreur inconnue"}</Text>
+        <Text style={styles.errorText}>{error || "Lecteur indisponible"}</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <Stack.Screen options={{ title: title || "Lecture" }} />
       <View style={styles.header}>
         <Text style={styles.title} numberOfLines={2}>
-          {loan.title}
+          {title}
         </Text>
-        <Text style={styles.author}>{loan.author}</Text>
-        {loan.narrator ? (
-          <Text style={styles.narrator}>Lu par {loan.narrator}</Text>
+        {author ? <Text style={styles.author}>{author}</Text> : null}
+        {narrator ? (
+          <Text style={styles.narrator}>Lu par {narrator}</Text>
         ) : null}
       </View>
       <WebView
         ref={webRef}
-        source={{ uri: loan.streamUrl }}
+        source={{ uri: streamUrl }}
         style={styles.webview}
         onMessage={handleMessage}
         javaScriptEnabled

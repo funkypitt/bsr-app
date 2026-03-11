@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, Stack } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import * as api from "../../src/api/client";
+import { getStoredBook } from "../../src/store";
 import { colors, spacing, typography } from "../../src/theme";
 import type { Book } from "../../src/types";
 
@@ -27,13 +28,42 @@ export default function BookDetail() {
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
   const [borrowing, setBorrowing] = useState(false);
+  const [loanStreamUrl, setLoanStreamUrl] = useState<string>("");
 
   useEffect(() => {
     if (!id) return;
-    api.getBook(id).then((b) => {
-      setBook(b);
+
+    (async () => {
+      // 1. Get book from in-memory store (has author from search)
+      const stored = getStoredBook(id);
+
+      // 2. Also fetch fresh OPDS data for current borrow/stream state
+      const fresh = await api.getBook(id);
+
+      // Merge: prefer stored metadata (has author), fresh links
+      const merged: Book = {
+        ...(stored ?? fresh ?? ({} as Book)),
+        // Override links from fresh data if available
+        borrowUrl: fresh?.borrowUrl || stored?.borrowUrl || "",
+        streamUrl: fresh?.streamUrl || stored?.streamUrl || "",
+        availability: fresh?.availability || stored?.availability,
+      };
+
+      setBook(merged);
+
+      // 3. Check if already borrowed (stream URL comes from loans)
+      try {
+        const loans = await api.getLoans();
+        const loan = loans.find((l) => l.id === id);
+        if (loan?.streamUrl) {
+          setLoanStreamUrl(loan.streamUrl);
+        }
+      } catch {
+        // ignore
+      }
+
       setLoading(false);
-    });
+    })();
   }, [id]);
 
   const handleBorrow = async () => {
@@ -42,13 +72,25 @@ export default function BookDetail() {
     const ok = await api.borrowBook(book.borrowUrl);
     setBorrowing(false);
     if (ok) {
-      Alert.alert("Emprunté", "Le livre a été emprunté avec succès.", [
-        { text: "Écouter", onPress: () => router.push(`/player/${book.id}`) },
-        { text: "OK" },
-      ]);
-      // Refresh book data
-      const updated = await api.getBook(id!);
-      if (updated) setBook(updated);
+      // Refresh loans to get the stream URL
+      try {
+        const loans = await api.getLoans();
+        const loan = loans.find((l) => l.id === id);
+        if (loan?.streamUrl) {
+          setLoanStreamUrl(loan.streamUrl);
+          Alert.alert("Emprunté !", "Le livre est prêt à écouter.", [
+            {
+              text: "Écouter",
+              onPress: () => router.push(`/player/${book.id}`),
+            },
+            { text: "OK" },
+          ]);
+        } else {
+          Alert.alert("Emprunté !", "Le livre a été ajouté à vos emprunts.");
+        }
+      } catch {
+        Alert.alert("Emprunté !", "Le livre a été emprunté.");
+      }
     } else {
       Alert.alert("Erreur", "Impossible d'emprunter ce livre.");
     }
@@ -62,102 +104,126 @@ export default function BookDetail() {
     );
   }
 
-  if (!book) {
+  if (!book || !book.title) {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>Livre introuvable</Text>
+        <Pressable style={styles.backLink} onPress={() => router.back()}>
+          <Text style={styles.backLinkText}>Retour</Text>
+        </Pressable>
       </View>
     );
   }
 
+  const canPlay = !!loanStreamUrl || !!book.streamUrl;
+  const canBorrow = !!book.borrowUrl && !canPlay;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        {book.coverUrl ? (
-          <Image source={{ uri: book.coverUrl }} style={styles.cover} />
-        ) : (
-          <View style={[styles.cover, styles.coverPlaceholder]}>
-            <Text style={styles.coverLetter}>{book.title[0]}</Text>
+    <>
+      <Stack.Screen options={{ title: book.title }} />
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+      >
+        <View style={styles.header}>
+          {book.coverUrl ? (
+            <Image source={{ uri: book.coverUrl }} style={styles.cover} />
+          ) : (
+            <View style={[styles.cover, styles.coverPlaceholder]}>
+              <Text style={styles.coverLetter}>
+                {book.title?.[0] ?? "?"}
+              </Text>
+            </View>
+          )}
+          <View style={styles.headerInfo}>
+            <Text style={styles.title}>{book.title}</Text>
+            {book.author ? (
+              <Text style={styles.author}>{book.author}</Text>
+            ) : null}
+            {book.narrator ? (
+              <Text style={styles.narrator}>Lu par {book.narrator}</Text>
+            ) : null}
+            {book.duration > 0 && (
+              <Text style={styles.duration}>
+                {formatDuration(book.duration)}
+              </Text>
+            )}
+            {book.isAudiobook && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>Livre audio</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.actions}>
+          {canPlay && (
+            <Pressable
+              style={styles.listenButton}
+              onPress={() => router.push(`/player/${book.id}`)}
+            >
+              <Text style={styles.listenButtonText}>▶ Écouter</Text>
+            </Pressable>
+          )}
+          {canBorrow && (
+            <Pressable
+              style={[styles.borrowButton, borrowing && { opacity: 0.7 }]}
+              onPress={handleBorrow}
+              disabled={borrowing}
+            >
+              {borrowing ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.borrowButtonText}>Emprunter</Text>
+              )}
+            </Pressable>
+          )}
+          {!canPlay && !canBorrow && book.availability?.state !== "available" && (
+            <View style={styles.unavailableBox}>
+              <Text style={styles.unavailableText}>
+                Indisponible actuellement
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {book.subjects.length > 0 && (
+          <View style={styles.tags}>
+            {book.subjects.map((s) => (
+              <View key={s} style={styles.tag}>
+                <Text style={styles.tagText}>{s}</Text>
+              </View>
+            ))}
           </View>
         )}
-        <View style={styles.headerInfo}>
-          <Text style={styles.title}>{book.title}</Text>
-          <Text style={styles.author}>{book.author}</Text>
-          {book.narrator ? (
-            <Text style={styles.narrator}>Lu par {book.narrator}</Text>
-          ) : null}
-          {book.duration > 0 && (
-            <Text style={styles.duration}>{formatDuration(book.duration)}</Text>
-          )}
-          {book.isAudiobook && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>Livre audio</Text>
-            </View>
-          )}
-        </View>
-      </View>
 
-      <View style={styles.actions}>
-        {book.streamUrl ? (
-          <Pressable
-            style={styles.listenButton}
-            onPress={() => router.push(`/player/${book.id}`)}
-          >
-            <Text style={styles.listenButtonText}>▶ Écouter</Text>
-          </Pressable>
-        ) : book.borrowUrl ? (
-          <Pressable
-            style={[styles.borrowButton, borrowing && { opacity: 0.7 }]}
-            onPress={handleBorrow}
-            disabled={borrowing}
-          >
-            {borrowing ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Text style={styles.borrowButtonText}>Emprunter</Text>
-            )}
-          </Pressable>
+        {book.description ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Résumé</Text>
+            <Text style={styles.description}>{book.description}</Text>
+          </View>
         ) : null}
-      </View>
-
-      {book.subjects.length > 0 && (
-        <View style={styles.tags}>
-          {book.subjects.map((s) => (
-            <View key={s} style={styles.tag}>
-              <Text style={styles.tagText}>{s}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {book.description ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Résumé</Text>
-          <Text style={styles.description}>{book.description}</Text>
-        </View>
-      ) : null}
-
-      {book.availability && (
-        <View style={styles.section}>
-          <Text style={styles.availabilityText}>
-            {book.availability.state === "available"
-              ? "Disponible"
-              : "Indisponible"}
-            {book.availability.until
-              ? ` · Jusqu'au ${new Date(book.availability.until).toLocaleDateString("fr-CH")}`
-              : ""}
-          </Text>
-        </View>
-      )}
-    </ScrollView>
+      </ScrollView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-  errorText: { ...typography.body, color: colors.textSecondary },
+  centered: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: spacing.lg,
+  },
+  errorText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+  },
+  backLink: { padding: spacing.md },
+  backLinkText: { color: colors.primary, fontSize: 16, fontWeight: "600" },
   header: { flexDirection: "row", gap: spacing.md },
   cover: { width: 120, height: 180, borderRadius: 8 },
   coverPlaceholder: {
@@ -168,7 +234,11 @@ const styles = StyleSheet.create({
   coverLetter: { color: colors.white, fontSize: 36, fontWeight: "700" },
   headerInfo: { flex: 1, justifyContent: "center" },
   title: { ...typography.title, fontSize: 20, marginBottom: spacing.xs },
-  author: { ...typography.subtitle, color: colors.textSecondary, marginBottom: 2 },
+  author: {
+    ...typography.subtitle,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
   narrator: { ...typography.caption, marginBottom: spacing.xs },
   duration: { ...typography.caption, color: colors.textLight },
   badge: {
@@ -195,6 +265,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   borrowButtonText: { color: colors.white, fontSize: 16, fontWeight: "700" },
+  unavailableBox: {
+    backgroundColor: colors.border,
+    borderRadius: 12,
+    padding: spacing.md,
+    alignItems: "center",
+  },
+  unavailableText: { ...typography.body, color: colors.textSecondary },
   tags: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -211,5 +288,4 @@ const styles = StyleSheet.create({
   section: { marginTop: spacing.lg },
   sectionTitle: { ...typography.subtitle, marginBottom: spacing.sm },
   description: { ...typography.body, lineHeight: 22 },
-  availabilityText: { ...typography.caption, color: colors.accent },
 });

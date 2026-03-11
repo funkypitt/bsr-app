@@ -86,7 +86,6 @@ export async function restoreSession(): Promise<boolean> {
     const stored = await SecureStore.getItemAsync("auth_tokens");
     if (!stored) return false;
     tokens = JSON.parse(stored);
-    // Verify token still works
     const res = await fetch(`${API}/my_profile.opds2`, { headers: headers() });
     if (res.ok) return true;
     return refreshToken();
@@ -106,44 +105,48 @@ export function isAuthenticated(): boolean {
 
 // --- Helpers ---
 
-function findLink(links: OPDSLink[] | undefined, rel: string): string {
-  return links?.find((l) => l.rel === rel || l.rel?.includes(rel))?.href ?? "";
+function extractId(links: OPDSLink[]): string {
+  for (const l of links) {
+    if (l.rel === "alternate" || l.rel === "self") {
+      const m = l.href?.match(/resources\/([a-f0-9]+)/);
+      if (m) return m[1];
+    }
+  }
+  return "";
 }
 
-function pubToBook(pub: OPDSPublication): Book {
+export function pubToBook(pub: OPDSPublication): Book {
   const m = pub.metadata;
   const links = pub.links ?? [];
 
+  // Stream link: text/html with drm=none (only available for active loans)
   const streamLink = links.find(
     (l) =>
       l.rel?.includes("acquisition") &&
       l.type === "text/html" &&
       l.href?.includes("drm=none")
   );
+
   const sampleLink = links.find((l) => l.rel?.includes("sample"));
-  const borrowLink = links.find(
-    (l) =>
-      l.rel?.includes("borrow") ||
-      (l.rel?.includes("acquisition") && !streamLink && !sampleLink)
-  );
+
+  // Borrow link: rel contains "borrow"
+  const borrowLink = links.find((l) => l.rel?.includes("borrow"));
+
   const progressionLink = links.find((l) =>
     l.rel?.includes("progression")
   );
-  const availability = streamLink?.properties?.availability ??
+
+  // Get availability from any acquisition link
+  const availability =
+    streamLink?.properties?.availability ??
     borrowLink?.properties?.availability ??
     links.find((l) => l.properties?.availability)?.properties?.availability;
 
-  const id =
-    links.find((l) => l.rel === "alternate" || l.rel === "self")?.href ?? "";
-  const idMatch = id.match(/resources\/([a-f0-9]+)/);
-
   return {
-    id: idMatch?.[1] ?? m.identifier ?? "",
-    title: m.title,
-    author:
-      m.author?.map((a) => a.name).join(", ") ?? "",
-    narrator:
-      m.narrator?.map((n) => n.name).join(", ") ?? "",
+    id: extractId(links) || m.identifier || "",
+    title: m.title || "",
+    author: m.author?.map((a) => a.name).join(", ") ?? "",
+    narrator: m.narrator?.map((n) => n.name).join(", ") ?? "",
     duration: m.duration ?? 0,
     coverUrl: pub.images?.[0]?.href ?? "",
     description: m.description ?? "",
@@ -175,7 +178,7 @@ export async function search(
 export async function getBook(id: string): Promise<Book | null> {
   try {
     const pub = await fetchJSON<OPDSPublication>(
-      `${BASE}/resources/${id}.opds2`
+      `${API}/resources/${id}.opds2`
     );
     return pubToBook(pub);
   } catch {
@@ -193,32 +196,27 @@ export async function getLoans(): Promise<Loan[]> {
   for (const group of feed.groups ?? []) {
     for (const pub of group.publications ?? []) {
       const book = pubToBook(pub);
-      if (book.streamUrl) {
-        const acqLink = pub.links?.find(
-          (l) =>
-            l.properties?.availability?.until && l.rel?.includes("acquisition")
-        );
-        loans.push({
-          ...book,
-          loanUntil:
-            acqLink?.properties?.availability?.until ?? "",
-          streamUrl: book.streamUrl,
-        });
-      }
+      // Include all loans (audiobooks), even without stream URL yet
+      const acqLink = pub.links?.find(
+        (l) => l.properties?.availability?.until
+      );
+      loans.push({
+        ...book,
+        loanUntil: acqLink?.properties?.availability?.until ?? "",
+        streamUrl: book.streamUrl,
+      });
     }
   }
   return loans;
 }
 
-export async function borrowBook(
-  borrowUrl: string
-): Promise<boolean> {
+export async function borrowBook(borrowUrl: string): Promise<boolean> {
   try {
     const res = await fetch(borrowUrl, {
       method: "POST",
       headers: headers(),
     });
-    return res.ok || res.status === 201;
+    return res.ok || res.status === 201 || res.status === 302;
   } catch {
     return false;
   }
@@ -231,7 +229,7 @@ export async function getProgression(
 ): Promise<number | null> {
   try {
     const data = await fetchJSON<{ position?: number }>(
-      `${BASE}/resources/${resourceId}/progression.opds2`
+      `${API}/resources/${resourceId}/progression.opds2`
     );
     return data.position ?? null;
   } catch {
@@ -244,7 +242,7 @@ export async function saveProgression(
   position: number
 ): Promise<void> {
   try {
-    await fetch(`${BASE}/resources/${resourceId}/progression.opds2`, {
+    await fetch(`${API}/resources/${resourceId}/progression.opds2`, {
       method: "PUT",
       headers: { ...headers(), "Content-Type": "application/json" },
       body: JSON.stringify({ position }),

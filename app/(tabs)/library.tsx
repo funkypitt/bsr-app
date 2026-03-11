@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import * as api from "../../src/api/client";
+import { storeBook } from "../../src/store";
 import { colors, spacing, typography } from "../../src/theme";
 import type { Loan } from "../../src/types";
 
@@ -40,7 +41,14 @@ function LoanCard({
   return (
     <Pressable
       style={styles.card}
-      onPress={() => router.push(`/player/${loan.id}`)}
+      onPress={() => {
+        storeBook(loan);
+        if (loan.streamUrl) {
+          router.push(`/player/${loan.id}`);
+        } else {
+          router.push(`/book/${loan.id}`);
+        }
+      }}
     >
       {loan.coverUrl ? (
         <Image source={{ uri: loan.coverUrl }} style={styles.cover} />

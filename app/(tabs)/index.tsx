@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import * as api from "../../src/api/client";
+import { storeBook } from "../../src/store";
 import { colors, spacing, typography } from "../../src/theme";
 import type { Book } from "../../src/types";
 
@@ -27,7 +28,10 @@ function BookCard({ book }: { book: Book }) {
   return (
     <Pressable
       style={styles.card}
-      onPress={() => router.push(`/book/${book.id}`)}
+      onPress={() => {
+        storeBook(book);
+        router.push(`/book/${book.id}`);
+      }}
     >
       {book.coverUrl ? (
         <Image source={{ uri: book.coverUrl }} style={styles.cover} />
