@@ -132,6 +132,9 @@ export function pubToBook(pub: OPDSPublication): Book {
   // Borrow link: rel contains "borrow"
   const borrowLink = links.find((l) => l.rel?.includes("borrow"));
 
+  // Return/revoke link: rel contains "revoke"
+  const revokeLink = links.find((l) => l.rel?.includes("revoke"));
+
   const progressionLink = links.find((l) =>
     l.rel?.includes("progression")
   );
@@ -156,6 +159,7 @@ export function pubToBook(pub: OPDSPublication): Book {
     streamUrl: streamLink?.href ?? "",
     sampleUrl: sampleLink?.href ?? "",
     borrowUrl: borrowLink?.href ?? "",
+    returnUrl: revokeLink?.href ?? "",
     progressionUrl: progressionLink?.href ?? "",
     availability: availability
       ? { state: availability.state, until: availability.until }
@@ -217,6 +221,18 @@ export async function borrowBook(borrowUrl: string): Promise<boolean> {
       headers: headers(),
     });
     return res.ok || res.status === 201 || res.status === 302;
+  } catch {
+    return false;
+  }
+}
+
+export async function returnBook(returnUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(returnUrl, {
+      method: "PUT",
+      headers: headers(),
+    });
+    return res.ok || res.status === 204;
   } catch {
     return false;
   }

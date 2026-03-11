@@ -28,7 +28,9 @@ export default function BookDetail() {
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
   const [borrowing, setBorrowing] = useState(false);
+  const [returning, setReturning] = useState(false);
   const [loanStreamUrl, setLoanStreamUrl] = useState<string>("");
+  const [loanReturnUrl, setLoanReturnUrl] = useState<string>("");
 
   useEffect(() => {
     if (!id) return;
@@ -45,6 +47,7 @@ export default function BookDetail() {
         ...(stored ?? fresh ?? ({} as Book)),
         // Override links from fresh data if available
         borrowUrl: fresh?.borrowUrl || stored?.borrowUrl || "",
+        returnUrl: fresh?.returnUrl || stored?.returnUrl || "",
         streamUrl: fresh?.streamUrl || stored?.streamUrl || "",
         availability: fresh?.availability || stored?.availability,
       };
@@ -57,6 +60,9 @@ export default function BookDetail() {
         const loan = loans.find((l) => l.id === id);
         if (loan?.streamUrl) {
           setLoanStreamUrl(loan.streamUrl);
+        }
+        if (loan?.returnUrl) {
+          setLoanReturnUrl(loan.returnUrl);
         }
       } catch {
         // ignore
@@ -76,6 +82,9 @@ export default function BookDetail() {
       try {
         const loans = await api.getLoans();
         const loan = loans.find((l) => l.id === id);
+        if (loan?.returnUrl) {
+          setLoanReturnUrl(loan.returnUrl);
+        }
         if (loan?.streamUrl) {
           setLoanStreamUrl(loan.streamUrl);
           Alert.alert("Emprunté !", "Le livre est prêt à écouter.", [
@@ -94,6 +103,37 @@ export default function BookDetail() {
     } else {
       Alert.alert("Erreur", "Impossible d'emprunter ce livre.");
     }
+  };
+
+  const handleReturn = () => {
+    const url = loanReturnUrl || book?.returnUrl;
+    if (!url) return;
+    Alert.alert(
+      "Rendre ce livre ?",
+      "Vous ne pourrez plus l'écouter après l'avoir rendu.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Rendre",
+          style: "destructive",
+          onPress: async () => {
+            setReturning(true);
+            const ok = await api.returnBook(url);
+            setReturning(false);
+            if (ok) {
+              setLoanStreamUrl("");
+              setLoanReturnUrl("");
+              setBook((prev) =>
+                prev ? { ...prev, streamUrl: "", returnUrl: "" } : prev
+              );
+              Alert.alert("Rendu", "Le livre a été rendu.");
+            } else {
+              Alert.alert("Erreur", "Impossible de rendre ce livre.");
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -117,6 +157,7 @@ export default function BookDetail() {
 
   const canPlay = !!loanStreamUrl || !!book.streamUrl;
   const canBorrow = !!book.borrowUrl && !canPlay;
+  const canReturn = !!(loanReturnUrl || book.returnUrl) && canPlay;
 
   return (
     <>
@@ -163,6 +204,19 @@ export default function BookDetail() {
               onPress={() => router.push(`/player/${book.id}`)}
             >
               <Text style={styles.listenButtonText}>▶ Écouter</Text>
+            </Pressable>
+          )}
+          {canReturn && (
+            <Pressable
+              style={[styles.returnButton, returning && { opacity: 0.7 }]}
+              onPress={handleReturn}
+              disabled={returning}
+            >
+              {returning ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Text style={styles.returnButtonText}>Rendre ce livre</Text>
+              )}
             </Pressable>
           )}
           {canBorrow && (
@@ -258,6 +312,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   listenButtonText: { color: colors.white, fontSize: 16, fontWeight: "700" },
+  returnButton: {
+    borderRadius: 12,
+    padding: spacing.md,
+    alignItems: "center",
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  returnButtonText: { color: colors.textSecondary, fontSize: 14, fontWeight: "600" },
   borrowButton: {
     backgroundColor: colors.primary,
     borderRadius: 12,

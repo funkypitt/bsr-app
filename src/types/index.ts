@@ -53,6 +53,7 @@ export interface Book {
   streamUrl?: string;
   sampleUrl?: string;
   borrowUrl?: string;
+  returnUrl?: string;
   progressionUrl?: string;
   availability?: { state: string; until?: string };
 }
