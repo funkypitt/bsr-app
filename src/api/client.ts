@@ -258,13 +258,25 @@ export async function getLoans(): Promise<Loan[]> {
   return loans;
 }
 
+/** Fetch with auto-refresh on 401, for mutation endpoints */
+async function fetchWithRetry(
+  url: string,
+  method: string
+): Promise<Response> {
+  let res = await fetch(url, { method, headers: headers() });
+  if (res.status === 401) {
+    const refreshed = await refreshToken();
+    if (refreshed) {
+      res = await fetch(url, { method, headers: headers() });
+    }
+  }
+  return res;
+}
+
 export async function borrowBook(borrowUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(borrowUrl, {
-      method: "POST",
-      headers: headers(),
-    });
-    return res.ok || res.status === 201 || res.status === 302;
+    const res = await fetchWithRetry(borrowUrl, "POST");
+    return res.ok;
   } catch {
     return false;
   }
@@ -272,11 +284,8 @@ export async function borrowBook(borrowUrl: string): Promise<boolean> {
 
 export async function cancelReservation(cancelUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(cancelUrl, {
-      method: "DELETE",
-      headers: headers(),
-    });
-    return res.ok || res.status === 204;
+    const res = await fetchWithRetry(cancelUrl, "DELETE");
+    return res.ok;
   } catch {
     return false;
   }
@@ -284,11 +293,8 @@ export async function cancelReservation(cancelUrl: string): Promise<boolean> {
 
 export async function returnBook(returnUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(returnUrl, {
-      method: "PUT",
-      headers: headers(),
-    });
-    return res.ok || res.status === 204;
+    const res = await fetchWithRetry(returnUrl, "PUT");
+    return res.ok;
   } catch {
     return false;
   }
