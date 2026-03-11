@@ -220,26 +220,40 @@ export async function getLoans(): Promise<Loan[]> {
   );
   const loans: Loan[] = [];
 
-  function addPub(pub: OPDSPublication) {
+  function addPub(pub: OPDSPublication, groupTitle: string) {
     const book = pubToBook(pub);
     const acqLink = pub.links?.find(
       (l) => l.properties?.availability?.until
     );
+    const availability = acqLink?.properties?.availability;
+    const isReservation =
+      availability?.state === "reserved" ||
+      groupTitle.toLowerCase().includes("réservation");
+    const holds = acqLink?.properties?.holds;
+    // Cancel URL for reservations: the borrow link when actions.cancellable
+    const cancelUrl =
+      acqLink?.properties?.actions?.cancellable ? acqLink.href : undefined;
+
     loans.push({
       ...book,
-      loanUntil: acqLink?.properties?.availability?.until ?? "",
-      streamUrl: book.streamUrl,
+      loanUntil: availability?.until ?? "",
+      streamUrl: book.streamUrl ?? "",
+      isReservation,
+      holdPosition: holds?.position,
+      holdTotal: holds?.total,
+      cancelUrl,
     });
   }
 
   // Check both groups and direct publications
   for (const group of feed.groups ?? []) {
+    const title = group.metadata?.title ?? "";
     for (const pub of group.publications ?? []) {
-      addPub(pub);
+      addPub(pub, title);
     }
   }
   for (const pub of feed.publications ?? []) {
-    addPub(pub);
+    addPub(pub, "");
   }
   return loans;
 }
@@ -251,6 +265,18 @@ export async function borrowBook(borrowUrl: string): Promise<boolean> {
       headers: headers(),
     });
     return res.ok || res.status === 201 || res.status === 302;
+  } catch {
+    return false;
+  }
+}
+
+export async function cancelReservation(cancelUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(cancelUrl, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    return res.ok || res.status === 204;
   } catch {
     return false;
   }

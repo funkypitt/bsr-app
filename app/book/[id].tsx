@@ -31,6 +31,11 @@ export default function BookDetail() {
   const [returning, setReturning] = useState(false);
   const [loanStreamUrl, setLoanStreamUrl] = useState<string>("");
   const [loanReturnUrl, setLoanReturnUrl] = useState<string>("");
+  const [reservation, setReservation] = useState<{
+    position?: number;
+    total?: number;
+    cancelUrl?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -70,11 +75,19 @@ export default function BookDetail() {
         try {
           const loans = await api.getLoans();
           const loan = loans.find((l) => l.id === id);
-          if (loan?.streamUrl) {
-            setLoanStreamUrl(loan.streamUrl);
-          }
-          if (loan?.returnUrl) {
-            setLoanReturnUrl(loan.returnUrl);
+          if (loan?.isReservation) {
+            setReservation({
+              position: loan.holdPosition,
+              total: loan.holdTotal,
+              cancelUrl: loan.cancelUrl,
+            });
+          } else if (loan) {
+            if (loan.streamUrl) {
+              setLoanStreamUrl(loan.streamUrl);
+            }
+            if (loan.returnUrl) {
+              setLoanReturnUrl(loan.returnUrl);
+            }
           }
         } catch {
           // ignore
@@ -170,8 +183,8 @@ export default function BookDetail() {
     );
   }
 
-  const canPlay = !!loanStreamUrl || !!book.streamUrl;
-  const canBorrow = !!book.borrowUrl && !canPlay;
+  const canPlay = !reservation && (!!loanStreamUrl || !!book.streamUrl);
+  const canBorrow = !!book.borrowUrl && !canPlay && !reservation;
   const canReturn = !!(loanReturnUrl || book.returnUrl) && canPlay;
 
   return (
@@ -247,7 +260,43 @@ export default function BookDetail() {
               )}
             </Pressable>
           )}
-          {!canPlay && !canBorrow && book.availability?.state !== "available" && (
+          {reservation && (
+            <View style={styles.reservedBox}>
+              <Text style={styles.reservedText}>
+                Réservé — position {reservation.position ?? "?"}/{reservation.total ?? "?"} dans la file
+              </Text>
+              {reservation.cancelUrl && (
+                <Pressable
+                  style={styles.cancelReservation}
+                  onPress={() => {
+                    Alert.alert(
+                      "Annuler la réservation ?",
+                      `Voulez-vous annuler la réservation de « ${book.title} » ?`,
+                      [
+                        { text: "Non", style: "cancel" },
+                        {
+                          text: "Oui, annuler",
+                          style: "destructive",
+                          onPress: async () => {
+                            const ok = await api.cancelReservation(reservation.cancelUrl!);
+                            if (ok) {
+                              setReservation(null);
+                              Alert.alert("Annulée", "La réservation a été annulée.");
+                            } else {
+                              Alert.alert("Erreur", "Impossible d'annuler la réservation.");
+                            }
+                          },
+                        },
+                      ]
+                    );
+                  }}
+                >
+                  <Text style={styles.cancelReservationText}>Annuler la réservation</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+          {!canPlay && !canBorrow && !reservation && book.availability?.state !== "available" && (
             <View style={styles.unavailableBox}>
               <Text style={styles.unavailableText}>
                 Indisponible actuellement
@@ -343,6 +392,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   borrowButtonText: { color: colors.white, fontSize: 16, fontWeight: "700" },
+  reservedBox: {
+    backgroundColor: "#FFF3E0",
+    borderRadius: 12,
+    padding: spacing.md,
+    alignItems: "center",
+  },
+  reservedText: {
+    ...typography.body,
+    color: colors.orange,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  cancelReservation: {
+    marginTop: spacing.sm,
+  },
+  cancelReservationText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textDecorationLine: "underline",
+  },
   unavailableBox: {
     backgroundColor: colors.border,
     borderRadius: 12,

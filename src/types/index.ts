@@ -27,6 +27,8 @@ export interface OPDSLink {
     indirectAcquisition?: { type: string }[];
     lcp_hashed_passphrase?: string;
     present?: boolean;
+    holds?: { position: number; total: number };
+    actions?: { cancellable?: boolean };
   };
 }
 
@@ -61,6 +63,10 @@ export interface Book {
 export interface Loan extends Book {
   loanUntil: string;
   streamUrl: string;
+  isReservation: boolean;
+  holdPosition?: number;
+  holdTotal?: number;
+  cancelUrl?: string;
 }
 
 export interface AuthTokens {
