@@ -18,7 +18,7 @@ export interface OPDSPublication {
 }
 
 export interface OPDSLink {
-  rel: string;
+  rel: string | string[];
   href: string;
   type?: string;
   templated?: boolean;

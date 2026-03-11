@@ -105,9 +105,18 @@ export function isAuthenticated(): boolean {
 
 // --- Helpers ---
 
+/** Check if a link's rel (string or array) contains a keyword */
+function relMatches(rel: string | string[] | undefined, keyword: string): boolean {
+  if (!rel) return false;
+  if (Array.isArray(rel)) {
+    return rel.some((r) => r.includes(keyword));
+  }
+  return rel.includes(keyword);
+}
+
 function extractId(links: OPDSLink[]): string {
   for (const l of links) {
-    if (l.rel === "alternate" || l.rel === "self") {
+    if (relMatches(l.rel, "alternate") || relMatches(l.rel, "self")) {
       const m = l.href?.match(/resources\/([a-f0-9]+)/);
       if (m) return m[1];
     }
@@ -119,24 +128,37 @@ export function pubToBook(pub: OPDSPublication): Book {
   const m = pub.metadata;
   const links = pub.links ?? [];
 
-  // Stream link: text/html with drm=none (only available for active loans)
-  const streamLink = links.find(
+  // Stream link: text/html with acquisition rel (Cantooka player)
+  // Primary: text/html with drm=none
+  let streamLink = links.find(
     (l) =>
-      l.rel?.includes("acquisition") &&
+      relMatches(l.rel, "acquisition") &&
       l.type === "text/html" &&
       l.href?.includes("drm=none")
   );
+  // Fallback: any text/html with acquisition rel
+  if (!streamLink) {
+    streamLink = links.find(
+      (l) => relMatches(l.rel, "acquisition") && l.type === "text/html"
+    );
+  }
+  // Fallback: any .html link with acquisition rel
+  if (!streamLink) {
+    streamLink = links.find(
+      (l) => relMatches(l.rel, "acquisition") && l.href?.includes(".html")
+    );
+  }
 
-  const sampleLink = links.find((l) => l.rel?.includes("sample"));
+  const sampleLink = links.find((l) => relMatches(l.rel, "sample"));
 
   // Borrow link: rel contains "borrow"
-  const borrowLink = links.find((l) => l.rel?.includes("borrow"));
+  const borrowLink = links.find((l) => relMatches(l.rel, "borrow"));
 
   // Return/revoke link: rel contains "revoke"
-  const revokeLink = links.find((l) => l.rel?.includes("revoke"));
+  const revokeLink = links.find((l) => relMatches(l.rel, "revoke"));
 
   const progressionLink = links.find((l) =>
-    l.rel?.includes("progression")
+    relMatches(l.rel, "progression")
   );
 
   // Get availability from any acquisition link
@@ -197,19 +219,27 @@ export async function getLoans(): Promise<Loan[]> {
     `${API}/my_profile/activity.opds2`
   );
   const loans: Loan[] = [];
+
+  function addPub(pub: OPDSPublication) {
+    const book = pubToBook(pub);
+    const acqLink = pub.links?.find(
+      (l) => l.properties?.availability?.until
+    );
+    loans.push({
+      ...book,
+      loanUntil: acqLink?.properties?.availability?.until ?? "",
+      streamUrl: book.streamUrl,
+    });
+  }
+
+  // Check both groups and direct publications
   for (const group of feed.groups ?? []) {
     for (const pub of group.publications ?? []) {
-      const book = pubToBook(pub);
-      // Include all loans (audiobooks), even without stream URL yet
-      const acqLink = pub.links?.find(
-        (l) => l.properties?.availability?.until
-      );
-      loans.push({
-        ...book,
-        loanUntil: acqLink?.properties?.availability?.until ?? "",
-        streamUrl: book.streamUrl,
-      });
+      addPub(pub);
     }
+  }
+  for (const pub of feed.publications ?? []) {
+    addPub(pub);
   }
   return loans;
 }
