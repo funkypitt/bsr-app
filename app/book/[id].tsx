@@ -106,15 +106,24 @@ export default function BookDetail() {
     const ok = await api.borrowBook(book.borrowUrl);
     setBorrowing(false);
     if (ok) {
-      // Refresh loans to get the stream URL
+      // Refresh loans to check if it's a loan or reservation
       try {
         const loans = await api.getLoans();
         const loan = loans.find((l) => l.id === id);
-        if (loan?.returnUrl) {
-          setLoanReturnUrl(loan.returnUrl);
-        }
-        if (loan?.streamUrl) {
+        if (loan?.isReservation) {
+          // It became a reservation (book not available)
+          setReservation({
+            position: loan.holdPosition,
+            total: loan.holdTotal,
+            cancelUrl: loan.cancelUrl,
+          });
+          Alert.alert(
+            "Réservé !",
+            `Vous êtes en position ${loan.holdPosition ?? "?"}/${loan.holdTotal ?? "?"} dans la file d'attente.`
+          );
+        } else if (loan?.streamUrl) {
           setLoanStreamUrl(loan.streamUrl);
+          if (loan.returnUrl) setLoanReturnUrl(loan.returnUrl);
           Alert.alert("Emprunté !", "Le livre est prêt à écouter.", [
             {
               text: "Écouter",
@@ -126,10 +135,10 @@ export default function BookDetail() {
           Alert.alert("Emprunté !", "Le livre a été ajouté à vos emprunts.");
         }
       } catch {
-        Alert.alert("Emprunté !", "Le livre a été emprunté.");
+        Alert.alert(isAvailable ? "Emprunté !" : "Réservé !", "L'opération a réussi.");
       }
     } else {
-      Alert.alert("Erreur", "Impossible d'emprunter ce livre.");
+      Alert.alert("Erreur", isAvailable ? "Impossible d'emprunter ce livre." : "Impossible de réserver ce livre.");
     }
   };
 
@@ -184,6 +193,7 @@ export default function BookDetail() {
   }
 
   const canPlay = !reservation && (!!loanStreamUrl || !!book.streamUrl);
+  const isAvailable = book.availability?.state === "available";
   const canBorrow = !!book.borrowUrl && !canPlay && !reservation;
   const canReturn = !!(loanReturnUrl || book.returnUrl) && canPlay;
 
@@ -249,14 +259,19 @@ export default function BookDetail() {
           )}
           {canBorrow && (
             <Pressable
-              style={[styles.borrowButton, borrowing && { opacity: 0.7 }]}
+              style={[
+                isAvailable ? styles.borrowButton : styles.reserveButton,
+                borrowing && { opacity: 0.7 },
+              ]}
               onPress={handleBorrow}
               disabled={borrowing}
             >
               {borrowing ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Text style={styles.borrowButtonText}>Emprunter</Text>
+                <Text style={styles.borrowButtonText}>
+                  {isAvailable ? "Emprunter" : "Réserver"}
+                </Text>
               )}
             </Pressable>
           )}
@@ -387,6 +402,12 @@ const styles = StyleSheet.create({
   returnButtonText: { color: colors.textSecondary, fontSize: 14, fontWeight: "600" },
   borrowButton: {
     backgroundColor: colors.primary,
+    borderRadius: 12,
+    padding: spacing.md,
+    alignItems: "center",
+  },
+  reserveButton: {
+    backgroundColor: colors.orange,
     borderRadius: 12,
     padding: spacing.md,
     alignItems: "center",
